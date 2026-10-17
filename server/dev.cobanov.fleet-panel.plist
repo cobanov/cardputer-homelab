@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.cobanov.fleet-panel</string>
+  <key>ProgramArguments</key>
+  <array><string>/opt/homebrew/bin/python3</string><string>/Users/cobanov/Workspace/pcb-design/cardputer/server/fleet-panel.py</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/fleet-panel.log</string>
+  <key>StandardErrorPath</key><string>/tmp/fleet-panel.log</string>
+</dict>
+</plist>
