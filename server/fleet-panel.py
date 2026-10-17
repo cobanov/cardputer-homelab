@@ -77,4 +77,4 @@ if __name__ == "__main__":
               "mounts": [{"path": "/", "used_kib": 1, "avail_kib": 3}], "activity": "idle"})
     assert "SECRET" not in json.dumps(s) and s["disk"] == 25.0 and s["mem"] == 50.0, s
     threading.Thread(target=refresh, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

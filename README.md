@@ -20,10 +20,12 @@ A pocket homelab panel for the [M5Stack Cardputer](https://docs.m5stack.com/en/c
 ## How it works
 
 ```
-Cardputer  ──Wi-Fi──▶  fleet-panel (server/fleet-panel.py)  ──ssh──▶  every machine
-  GET /panel every 15 s    runs `fleet --json` every 15 s
-                           serves a ~2 KB summary
+Cardputer ──HTTPS──▶ Cloudflare Access ──tunnel──▶ fleet-panel (localhost) ──ssh──▶ every machine
+  service token        rejects anything else     runs `fleet --json` every 15 s
+  any Wi-Fi                                      serves a ~2 KB summary
 ```
+
+The panel works from any network. fleet-panel listens on `127.0.0.1` only; the one way in is a Cloudflare Tunnel on the same machine, behind an Access app that accepts the Cardputer's service token. The firmware verifies the TLS certificate against the roots in `include/ca_roots.h`.
 
 ## Hardware
 
@@ -36,9 +38,11 @@ M5Stack Cardputer v1.1 (StampS3A, ESP32-S3FN8, 8 MB flash, no PSRAM). The ADV mo
 Install and configure [fleet](https://github.com/cobanov/fleet) on a machine that can SSH into your hosts (`fleet setup`), then:
 
 ```sh
-python3 server/fleet-panel.py      # serves GET /panel on :8791 (set PORT to change)
+python3 server/fleet-panel.py      # serves GET /panel on 127.0.0.1:8791 (set PORT to change)
 curl localhost:8791/panel          # check
 ```
+
+Publish it with a Cloudflare Tunnel on the same machine (ingress `https://<host>/` → `http://localhost:8791`), put an Access app in front of the hostname, and create a service token for the Cardputer.
 
 On macOS, `server/dev.cobanov.fleet-panel.plist` keeps it running as a LaunchAgent. Edit the paths in it, copy it to `~/Library/LaunchAgents/` and run `launchctl bootstrap gui/$(id -u) <plist>`.
 
@@ -47,8 +51,8 @@ On macOS, `server/dev.cobanov.fleet-panel.plist` keeps it running as a LaunchAge
 Needs [PlatformIO](https://platformio.org/).
 
 ```sh
-cp include/secrets.example.h include/secrets.h   # list your Wi-Fi networks
-# set PANEL_URL in src/main.cpp to the server's address
+cp include/secrets.example.h include/secrets.h   # Wi-Fi networks + Access service token
+# set PANEL_URL in src/main.cpp to your hostname
 pio run -t upload
 ```
 
@@ -71,7 +75,7 @@ If the Cardputer still runs UiFlow and does not show up for flashing, switch it 
 
 ## Notes
 
-- The server has no auth. Keep it on a trusted LAN; the panel only works on that network.
+- If the Cardputer is lost, revoke its service token in Cloudflare Zero Trust.
 - The built-in font is ASCII only; the server replaces the few non-ASCII characters fleet uses.
 - Windows hosts are not supported by fleet yet; monitor their WSL side instead.
 

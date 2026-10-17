@@ -1,20 +1,22 @@
 // Cardputer homelab panel: shows CPU/RAM/disk/GPU for every machine, read from the fleet-panel
-// service (server/fleet-panel.py) on the Mac mini. Wi-Fi list lives in include/secrets.h.
-// The service is LAN-only, so the panel only works on the home network.
+// service (server/fleet-panel.py) on the Mac mini, published through its own Cloudflare Tunnel behind
+// Cloudflare Access. Wi-Fi list and the Access service token live in include/secrets.h.
 #include <M5Cardputer.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <algorithm>
 #include <vector>
 #include "secrets.h"
+#include "ca_roots.h"
 
 #define N(a) (int)(sizeof(a) / sizeof(a[0]))
 
 // ---------- data source ----------
 
-#define PANEL_URL "http://192.168.8.110:8791/panel"  // Mac mini, launchd dev.cobanov.fleet-panel
+#define PANEL_URL "https://panel.cobanov.dev/panel"  // macmini tunnel -> localhost:8791 (fleet-panel)
 const uint32_t REFRESH_MS = 15000;
 
 struct Host {
@@ -48,6 +50,7 @@ Page page = HOSTS, helpReturn = HOSTS;
 std::vector<Host> hosts;
 int sel = 0, scroll = 0;
 bool fetchOk = false;
+String fetchErr;
 int dataAge = 0;
 uint32_t lastFetch = 0, lastOk = 0, lastScan = 0, lastRender = 0, toastUntil = 0;
 String toastMsg;
@@ -78,20 +81,32 @@ void bar(int x, int y, int w, int h, float v) {
 
 float num(JsonVariant v) { return v.isNull() ? NAN : v.as<float>(); }
 
+WiFiClientSecure tls;
+HTTPClient http;  // kept between fetches so the TLS connection is reused
+
+bool fail(const String& why) {
+  fetchErr = why;
+  return fetchOk = false;
+}
+
 // Fetches the summary; on failure the previous data stays.
 bool fetch() {
   lastFetch = millis();
-  if (!online()) return fetchOk = false;
-  WiFiClient client;
-  HTTPClient http;
-  http.setConnectTimeout(1500);  // keep the UI from freezing long when off the home network
-  http.setTimeout(3000);
-  http.begin(client, PANEL_URL);
+  if (!online()) return fail("no Wi-Fi");
+  http.setReuse(true);
+  http.setConnectTimeout(5000);
+  http.setTimeout(8000);
+  http.begin(tls, PANEL_URL);
+  http.addHeader("CF-Access-Client-Id", CF_ACCESS_CLIENT_ID);
+  http.addHeader("CF-Access-Client-Secret", CF_ACCESS_CLIENT_SECRET);
   int code = http.GET();
   String body = code == 200 ? http.getString() : "";
   http.end();
+  // Access answers a bad or revoked token with a redirect to its login page
+  if (code == 302 || code == 403) return fail("access denied (token?)");
+  if (code != 200) return fail(code > 0 ? "HTTP " + String(code) : "panel unreachable");
   JsonDocument doc;
-  if (code != 200 || deserializeJson(doc, body)) return fetchOk = false;
+  if (deserializeJson(doc, body)) return fail("bad response");
 
   std::vector<Host> fresh;
   for (JsonObject o : doc["hosts"].as<JsonArray>()) {
@@ -165,8 +180,7 @@ void drawHosts() {
   for (int c = 0; c < 3; c++) text(cols[c], COL_X[c], 17, MUTED);
   if (!lastOk) freshness();
   if (hosts.empty()) {
-    text(!online() ? "waiting for Wi-Fi..." : lastFetch ? "Mac mini unreachable" : "loading...", W / 2, 70, DIM,
-         middle_center);
+    text(!online() ? "waiting for Wi-Fi..." : lastFetch ? fetchErr : "loading...", W / 2, 70, DIM, middle_center);
     footer(String(PANEL_URL).substring(7));
     return;
   }
@@ -186,7 +200,7 @@ void drawHosts() {
   }
   int down = std::count_if(hosts.begin(), hosts.end(), [](const Host& h) { return !h.up; });
   String summary = String(hosts.size() - down) + "/" + String(hosts.size()) + " up";
-  footer(lastOk && !fetchOk ? String("Mac mini unreachable") : summary + "  -  Enter for details");
+  footer(lastOk && !fetchOk ? fetchErr : summary + "  -  Enter for details");
 }
 
 void drawDetail() {
@@ -332,7 +346,7 @@ void handleKey(char k) {
 
   switch (k) {
     case 'r':
-      toast(fetch() ? "refreshed" : "Mac mini unreachable");
+      toast(fetch() ? "refreshed" : fetchErr);
       break;
     case 't':
       if (online()) startNtp();
@@ -357,6 +371,7 @@ void setup() {
   M5Cardputer.Display.setRotation(1);
   C.createSprite(W, 135);
   C.setFont(&fonts::Font0);
+  tls.setCACert(CA_ROOTS);
   prefs.begin("panel");
   tzIdx = prefs.getInt("tz", 0) % N(TZS);
   applyTz();
