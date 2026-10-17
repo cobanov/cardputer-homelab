@@ -1,7 +1,12 @@
 # cardputer-homelab
 
-A pocket homelab panel for the [M5Stack Cardputer](https://docs.m5stack.com/en/core/Cardputer) (original, ESP32-S3, no PSRAM).
+A pocket homelab panel for the [M5Stack Cardputer](https://docs.m5stack.com/en/core/Cardputer) (v1.1 with StampS3A, ESP32-S3, no PSRAM).
 It shows whether each machine is up, with CPU, RAM, fullest disk, GPU, VRAM and container counts, refreshed every 15 s.
+
+<p>
+  <img src="docs/hosts.jpg" width="45%" alt="Host list: CPU, RAM and disk for every machine">
+  <img src="docs/detail.jpg" width="45%" alt="Host detail: CPU, RAM, disk, containers and current activity">
+</p>
 
 ```
 Cardputer --Wi-Fi--> fleet-panel (server/fleet-panel.py) --ssh--> every machine
