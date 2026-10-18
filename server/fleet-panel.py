@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fleet summary for the Cardputer homelab panel: GET /panel -> small JSON.
+"""fleet summary for the Cardputer homelab panel: GET /panel -> small JSON, GET / -> the same as a web page.
 
 Runs `fleet --json` every 15 s in the background and serves only the fields the
 panel shows. Raw fleet output includes process command lines (which can hold
@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 FLEET = os.path.expanduser("~/.local/bin/fleet")
 PORT = int(os.environ.get("PORT", "8791"))
 INTERVAL = 15
+PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
 cache = {"t": 0, "hosts": []}
 
 
@@ -57,12 +58,16 @@ def refresh():
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path != "/panel":
+        if self.path == "/":  # the same data as a page for the browser
+            body, kind = open(PAGE, "rb").read(), "text/html; charset=utf-8"
+        elif self.path == "/panel":
+            body, kind = json.dumps({"age": int(time.time()) - cache["t"], **cache}, separators=(",", ":")).encode(), "application/json"
+        else:
             self.send_error(404)
             return
-        body = json.dumps({"age": int(time.time()) - cache["t"], **cache}, separators=(",", ":")).encode()
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", kind)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

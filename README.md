@@ -40,6 +40,7 @@ Install and configure [fleet](https://github.com/cobanov/fleet) on a machine tha
 ```sh
 python3 server/fleet-panel.py      # serves GET /panel on 127.0.0.1:8791 (set PORT to change)
 curl localhost:8791/panel          # check
+open http://localhost:8791/         # the same data as a web page
 ```
 
 Publish it with a Cloudflare Tunnel on the same machine (ingress `https://<host>/` → `http://localhost:8791`), put an Access app in front of the hostname, and create a service token for the Cardputer.

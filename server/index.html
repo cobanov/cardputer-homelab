@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homelab</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fff; --text: #1d1d1f; --muted: #86868b; --line: #e5e5ea; --hover: #f5f5f7;
+    --track: #e5e5ea; --ok: #34c759; --warn: #ff9500; --bad: #ff3b30;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e1e1e; --text: #f5f5f7; --muted: #98989d; --line: #333; --hover: #2a2a2a; --track: #3a3a3c; --ok: #30d158; --warn: #ff9f0a; --bad: #ff453a; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  #summary { color: var(--muted); font-size: 13px; }
+  #summary.alert { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 0 8px 6px; }
+  td { padding: 7px 8px; border-top: 1px solid var(--line); }
+  tr.host { cursor: pointer; }
+  tr.host:hover td { background: var(--hover); }
+  tr.host:focus-visible { outline: 2px solid var(--ok); outline-offset: -2px; }
+  tr.off td { color: var(--muted); }
+  .name { font-weight: 500; white-space: nowrap; }
+  .metric { display: flex; align-items: center; gap: 8px; }
+  .metric span { width: 3.2em; text-align: right; }
+  .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; min-width: 30px; }
+  .bar i { display: block; height: 100%; background: var(--ok); }
+  .warn span { color: var(--warn); } .warn .bar i { background: var(--warn); }
+  .bad span { color: var(--bad); } .bad .bar i { background: var(--bad); }
+  tr.details td { border-top: 0; padding: 0 8px 12px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 16px; margin: 0; font-size: 13px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+  footer { margin-top: 16px; color: var(--muted); font-size: 12px; }
+  #error { color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Homelab</h1><span id="summary"></span></header>
+  <table>
+    <thead><tr><th>Machine</th><th>CPU</th><th>RAM</th><th>Disk</th></tr></thead>
+    <tbody id="hosts"></tbody>
+  </table>
+  <footer><span id="updated"></span> <span id="error"></span></footer>
+</main>
+<script>
+const open = new Set();
+const level = v => v == null ? "" : v >= 90 ? "bad" : v >= 75 ? "warn" : "";
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  Object.assign(node, attrs);
+  node.append(...children);
+  return node;
+}
+
+function metric(v) {
+  const bar = el("div", { className: "bar" }, el("i"));
+  bar.firstChild.style.width = Math.min(Math.max(v ?? 0, 0), 100) + "%";
+  return el("td", {}, el("div", { className: "metric " + level(v) },
+    el("span", { textContent: v == null ? "–" : Math.round(v) + "%" }), bar));
+}
+
+// fleet's activity line ("cpu 71% python", "idle - 14 containers") in plain words
+function activity(raw) {
+  if (raw.startsWith("idle")) return "Idle";
+  const m = raw.match(/^(cpu|gpu) (\S+) (.+)$/);
+  return m ? `${m[3].split(" (")[0]} at ${m[2]} ${m[1].toUpperCase()}` : raw;
+}
+
+function details(h) {
+  const rows = [];
+  const cpu = [h.cores && `${h.cores} cores`, h.load != null && `load ${h.load.toFixed(1)}`, h.temp != null && `${Math.round(h.temp)}°C`].filter(Boolean);
+  if (cpu.length) rows.push(["Processor", cpu.join(", ")]);
+  if (h.mt) rows.push(["Memory", `${h.mu} of ${h.mt} GB`]);
+  if (h.disk != null) rows.push(["Disk", `${Math.round(h.disk)}% of ${h.dpath || "/"}`]);
+  if (h.gname) rows.push(["Graphics", [h.gname, h.gpu != null && `${Math.round(h.gpu)}%`, h.vram != null && `VRAM ${Math.round(h.vram)}%`].filter(Boolean).join(", ")]);
+  if (h.ctot != null) rows.push(["Containers", `${h.crun ?? 0} of ${h.ctot} running`]);
+  if (h.act) rows.push(["Activity", activity(h.act)]);
+  const dl = el("dl");
+  for (const [k, v] of rows) dl.append(el("dt", { textContent: k }), el("dd", { textContent: v }));
+  return el("tr", { className: "details" }, el("td"), Object.assign(el("td", {}, dl), { colSpan: 3 }));
+}
+
+function render(data) {
+  const body = document.getElementById("hosts");
+  body.replaceChildren();
+  for (const h of data.hosts) {
+    if (!h.ok) {
+      body.append(el("tr", { className: "off" }, el("td", { className: "name", textContent: h.name }),
+        Object.assign(el("td", { textContent: "Offline" }), { colSpan: 3 })));
+      continue;
+    }
+    const row = el("tr", { className: "host", tabIndex: 0 }, el("td", { className: "name", textContent: h.name }),
+      metric(h.cpu), metric(h.mem), metric(h.disk));
+    const toggle = () => { open.has(h.name) ? open.delete(h.name) : open.add(h.name); render(data); };
+    row.onclick = toggle;
+    row.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
+    row.setAttribute("aria-expanded", open.has(h.name));
+    body.append(row);
+    if (open.has(h.name)) body.append(details(h));
+  }
+  const down = data.hosts.filter(h => !h.ok).length;
+  const summary = document.getElementById("summary");
+  summary.textContent = down ? `${down} of ${data.hosts.length} machines offline` : `All ${data.hosts.length} machines online`;
+  summary.className = down ? "alert" : "";
+  document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("panel", { cache: "no-store" });
+    if (!res.ok) throw new Error(`panel returned HTTP ${res.status}`);
+    render(await res.json());
+    document.getElementById("error").textContent = "";
+  } catch (e) {
+    document.getElementById("error").textContent = "Could not refresh: " + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>
